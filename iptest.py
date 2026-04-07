@@ -35,38 +35,52 @@ def fetch_cidrs():
     session = requests.Session()
     session.headers.update({"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:149.0) Gecko/20100101 Firefox/149.0"})
     html = session.get("https://ipregistry.co/AS209242", timeout=10).text
-    return list(set(re.findall(r"\d+\.\d+\.\d+\.\d+/\d+", html)))
+    
+    # 匹配IPv4和IPv6的CIDR格式
+    ipv4_pattern = r"\d+\.\d+\.\d+\.\d+/\d+"
+    ipv6_pattern = r"[0-9a-fA-F:.]+/\d+"
+    
+    ipv4_cidrs = re.findall(ipv4_pattern, html)
+    ipv6_cidrs = re.findall(ipv6_pattern, html)
+    
+    # 合并并去重
+    all_cidrs = list(set(ipv4_cidrs + ipv6_cidrs))
+    print(f"[*] 找到 {len(all_cidrs)} 个网段")
+    return all_cidrs
 
 
-# ===== 过滤 =====
-def filter_cidrs(cidrs):
-    result = []
-    for c in cidrs:
-        net = ipaddress.ip_network(c, strict=False)
-        if isinstance(net, ipaddress.IPv6Network):
+# ===== 处理IP段 =====
+def process_cidrs(cidrs):
+    ipv4_ips = []
+    ipv6_ips = []
+    
+    for cidr in cidrs:
+        try:
+            # 去掉CIDR后缀，得到网络地址
+            ip = cidr.split('/')[0]
+            # 验证是否为有效IP
+            ip_obj = ipaddress.ip_address(ip)
+            if isinstance(ip_obj, ipaddress.IPv4Address):
+                ipv4_ips.append(ip)
+            elif isinstance(ip_obj, ipaddress.IPv6Address):
+                ipv6_ips.append(ip)
+        except:
             continue
-        if net.prefixlen < 20:
-            continue
-        result.append(net)
-    return result
+    
+    print(f"[*] 处理后 - IPv4: {len(ipv4_ips)} 个, IPv6: {len(ipv6_ips)} 个")
+    return ipv4_ips, ipv6_ips
 
-
-# ===== 抽样（无全展开）=====
-def sample_ips(net):
-    size = net.num_addresses
-
-    if size <= 256:
-        count = 10
-    elif size <= 1024:
-        count = 20
-    else:
-        return []
-
-    base = int(net.network_address)
-    return [
-        str(ipaddress.ip_address(base + random.randint(1, size - 2)))
-        for _ in range(count)
-    ]
+# ===== 检测IPv6可用性 =====
+def check_ipv6_availability():
+    print("[*] 检测IPv6可用性...")
+    try:
+        # 测试连接阿里IPv6 DNS检测v6可用性
+        socket.create_connection(("2400:3200::1", 53), timeout=3)
+        print("[*] IPv6可用")
+        return True
+    except:
+        print("[*] IPv6不可用，将使用IPv4")
+        return False
 
 
 # ===== 测试 =====
@@ -119,14 +133,32 @@ def main():
 
     print(f"[*] 目标: {domain}")
 
-    cidrs = filter_cidrs(fetch_cidrs())
-    print(f"[*] 有效网段: {len(cidrs)}")
-
-    ips = []
-    for net in cidrs:
-        ips.extend(sample_ips(net))
-
-    print(f"[*] 抽样IP: {len(ips)}\n")
+    # 获取并处理IP段
+    cidrs = fetch_cidrs()
+    ipv4_ips, ipv6_ips = process_cidrs(cidrs)
+    
+    # 检测IPv6可用性
+    ipv6_available = check_ipv6_availability()
+    
+    # 构建测试IP列表
+    ips = ipv4_ips.copy()  # 基础测试v4
+    
+    # 如果v6可用且有v6地址，增加v6测试
+    if ipv6_available and len(ipv6_ips) > 0:
+        ips.extend(ipv6_ips)
+        print(f"[*] 测试IP: IPv4 {len(ipv4_ips)} 个 + IPv6 {len(ipv6_ips)} 个 = 共 {len(ips)} 个\n")
+    else:
+        # v6不可用或无v6地址
+        if not ipv6_available:
+            print("[*] IPv6不可用，仅测试IPv4地址\n")
+        elif len(ipv6_ips) == 0:
+            print("[*] 未找到IPv6地址，仅测试IPv4地址\n")
+        print(f"[*] 测试IP: IPv4 {len(ips)} 个\n")
+    
+    # 如果没有IP，提示错误
+    if not ips:
+        print("[!] 没有找到可用的IP地址")
+        return
 
     results = []
 

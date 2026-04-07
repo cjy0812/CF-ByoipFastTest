@@ -109,11 +109,13 @@ def test_ip(ip, domain):
 
 # ===== 主程序 =====
 def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument("-d", "--domain", default=DEFAULT_DOMAIN)
-    args = parser.parse_args()
-
-    domain = args.domain
+    # 从终端获取域名
+    domain = input("请输入测试域名 (例如: example.com): ").strip()
+    
+    # 验证域名输入
+    if not domain:
+        print("[!] 域名不能为空，请重新运行并输入有效的域名")
+        return
 
     print(f"[*] 目标: {domain}")
 
